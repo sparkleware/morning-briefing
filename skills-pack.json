@@ -1,0 +1,18 @@
+{
+  "name": "Morning Briefing",
+  "version": "0.1.0",
+  "description": "Daily morning briefing — date, day-of-week, current weather, and a sparkly closer. No API key required.",
+  "author": "sparkleware",
+  "license": "MIT",
+  "homepage": "https://github.com/sparkleware/morning-briefing",
+  "skills": [
+    {
+      "slug": "morning-briefing",
+      "path": "skills/morning-briefing",
+      "description": "Composes a one-screen morning briefing with date, weather (via wttr.in), and a holographic closer.",
+      "category": "productivity",
+      "schedule": "0 7 * * *",
+      "default_enabled": true
+    }
+  ]
+}
