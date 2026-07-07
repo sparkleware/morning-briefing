@@ -1,19 +1,21 @@
 ---
+type: Skill
 name: Morning Briefing
+category: productivity
 description: Friendly morning briefing — date, day-of-week, current weather (via wttr.in), and a sparkly motivational closer
 var: ""
 tags: [productivity, weather, daily, sparkleware]
 ---
 
+> **${var}** — Optional. The city/location for the weather lookup (e.g. `"Jakarta"`, `"Tokyo"`, or an airport code like `"CGK"`). If empty, wttr.in falls back to IP-geo (typically accurate within ~50km).
+
 # Morning Briefing ✦
 
-A small skill that runs once each morning and prints a one-screen briefing. Designed to feel like a kind, low-pressure hello rather than yet another notification.
-
-`${var}` is the **city/location** for the weather lookup. If empty, wttr.in uses your IP-geo (typically accurate within ~50km). Override with a city name like `"Jakarta"`, `"Tokyo"`, or even an airport code like `"CGK"`.
+Today is ${today}. This skill runs once each morning and writes a one-screen briefing — a kind, low-pressure hello rather than yet another notification.
 
 ## Goal
 
-Print three short sections — date/day, weather, closing — separated by sparkles. Total output ≤8 lines. Quick glance, then back to work.
+Compose three short sections — date/day, weather, closing — separated by sparkles, then **write them to a file** under `output/` and send a short summary via `./notify`. Total on-screen output ≤8 lines. Quick glance, then back to work.
 
 ## Steps
 
@@ -38,9 +40,25 @@ if [ -n "${var:-}" ]; then
 fi
 
 # `?format=4&M` = one-line summary, metric units. `?format=3` = without wind.
-WEATHER="$(curl -fsSL "https://wttr.in/${WEATHER_PATH}?format=4&M" 2>/dev/null || echo '')"
+WEATHER_URL="https://wttr.in/${WEATHER_PATH}?format=4&M"
+WEATHER="$(curl -fsSL "$WEATHER_URL" 2>/dev/null || echo '')"
+```
+
+If `$WEATHER` comes back empty, the sandbox network gate has likely blocked `curl` — **retry the exact same `$WEATHER_URL` with WebFetch** and use the one-line summary it returns. Only if both `curl` and WebFetch fail, degrade gracefully:
+
+```bash
 if [ -z "$WEATHER" ]; then
   WEATHER="(weather unavailable — wttr.in unreachable)"
+fi
+```
+
+Set a run status from the outcome (used by the notify + log steps):
+
+```bash
+if printf '%s' "$WEATHER" | grep -q 'unavailable'; then
+  STATUS="STATUS_DEGRADED"
+else
+  STATUS="STATUS_OK"
 fi
 ```
 
@@ -61,7 +79,31 @@ case "$(date -u +%u)" in
 esac
 ```
 
-### 4. Print the briefing
+### 4. Write the briefing to a file
+
+Persist the full briefing so there's a durable record — the file is the source of truth; `./notify` only sends the short version.
+
+```bash
+mkdir -p output
+cat > "output/morning-briefing-${today}.md" <<EOF
+# Morning Briefing ✦ ${today}
+
+\`\`\`
+       ✦
+     ✧   ✧
+   ✦  ●  ✦       Morning ✦
+     ✧   ✧
+       ✦
+\`\`\`
+
+- **${DATE_LINE}**
+- ${WEATHER}
+
+> ${CLOSER}
+EOF
+```
+
+### 5. Print the briefing (stdout)
 
 ```bash
 echo "       ✦"
@@ -76,19 +118,44 @@ echo ""
 echo "  ${CLOSER}"
 ```
 
-### 5. Optional — memory append
+### 6. Notify
+
+Send a SHORT summary via `./notify` — this is what reaches the operator; the file above is the full record:
+
+```
+*Morning briefing — ${today}*
+
+${WEATHER}
+${CLOSER}
+
+Full briefing: https://github.com/${GITHUB_REPOSITORY}/blob/main/output/morning-briefing-${today}.md
+```
+
+### 7. Log
+
+Append one status block to `memory/logs/${today}.md`:
 
 ```bash
-LOG_FILE="${AEON_ROOT:-.}/memory/logs/morning-briefing.log"
-if [ -d "${AEON_ROOT:-.}/memory" ]; then
-  mkdir -p "$(dirname "$LOG_FILE")"
-  printf '%s | %s | %s\n' "$(date -u +%Y-%m-%dT%H:%MZ)" "$WEATHER" "$CLOSER" >> "$LOG_FILE"
-fi
+mkdir -p memory/logs
+cat >> "memory/logs/${today}.md" <<EOF
+
+## morning-briefing
+- **Location**: ${var:-IP-geo}
+- **Weather**: ${WEATHER}
+- **Closer**: ${CLOSER}
+- **Status**: ${STATUS}
+EOF
 ```
+
+`${STATUS}` is `STATUS_OK` on a normal run, or `STATUS_DEGRADED` when the weather lookup was unreachable (both `curl` and WebFetch failed).
+
+## Sandbox note
+
+`WebFetch` and `WebSearch` are built-in Claude tools that bypass the GitHub Actions sandbox network gate. Use those for external reads; if a `curl` call returns empty in the sandbox, retry the same URL with `WebFetch`. This skill's only external read is the wttr.in weather lookup — keep the `curl` call, but if it returns empty, re-fetch the same `https://wttr.in/...` URL with `WebFetch` before falling back to "weather unavailable".
 
 ## Notes
 
 - Requires `curl` and standard `date`. No API key, no auth.
 - wttr.in is a public free service — be polite (1 request/day is well within their limits). If they're temporarily down, the briefing degrades gracefully to "weather unavailable" instead of erroring.
 - Closers are deterministic by day-of-week so you don't get the same line twice in a row.
-- Safe to schedule indefinitely. Pure read + optional log append.
+- Safe to schedule indefinitely. Pure read + file/log writes under `output/` and `memory/`.
